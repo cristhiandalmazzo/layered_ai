@@ -24,7 +24,7 @@ CHUNK_TARGET_SIZE_CHARS = 1000
 RELEVANCE_THRESHOLD = 0.70
 MAX_CONCURRENT_EMBEDDING_REQUESTS = 50 # Concurrency limit for embeddings
 # ** NEW: Configure conversation memory **
-MAX_HISTORY_TURNS = 5 # Limit how many past Q&A pairs to keep in memory
+MAX_HISTORY_TURNS = 10 # Limit how many past Q&A pairs to keep in memory
 
 # --- OpenAI Client ---
 api_key = os.getenv("OPENAI_API_KEY")
@@ -167,27 +167,28 @@ def retrieve_context(query_embedding: np.ndarray, top_k: int = 3) -> list[str]:
     logging.info(f"Retrieved {len(top_texts)} relevant context snippets (threshold={RELEVANCE_THRESHOLD}).")
     return top_texts
 
-# ** MODIFIED: generate_response now includes persona, history, and refined context **
 async def generate_response(
     user_input: str,
     history: list[ChatMessage],
     retrieved_context: list[str],
     model: str = "gpt-4-turbo-preview" # Or your preferred model
 ) -> str:
-    """Generates a conversational response using persona, history, and context."""
+    """Generates a conversational response using persona, history, context, and encouraging quotes."""
 
-    # --- 1. Construct the System Prompt with Persona ---
+    # --- 1. Construct the System Prompt with Persona and Quoting Instructions ---
     system_prompt = f"""You are the embodiment of the book '{BOOK_TITLE}'. Your knowledge is strictly limited to the content of this book.
     Answer the user's questions conversationally, as if you are the book speaking.
     Use the information provided under "Relevant Information" to formulate your response.
-    NEVER mention "the context provided", "the documents", or "the information given to me". Speak naturally from your perspective.
+
+    ***IMPORTANT INSTRUCTION***: If a direct quote from the 'Relevant Information' accurately and concisely answers or strongly supports a point in your response, incorporate it. Use standard quotation marks ("...") for these quotes. Ensure the quote is *exactly* as it appears in the relevant information snippets. Do *not* invent quotes.
+
+    NEVER mention "the context provided", "the documents", "snippets", or "the information given to me". Speak naturally from your perspective (as '{BOOK_TITLE}').
     If the relevant information doesn't contain the answer to the user's question, clearly state that the topic isn't covered within your pages. Do not make up information.
     Keep your answers concise and relevant to the query, drawing only from the provided information.
     Maintain a helpful and knowledgeable tone consistent with '{BOOK_TITLE}'.
     """
 
     # --- 2. Prepare Conversation History ---
-    # Keep only the last MAX_HISTORY_TURNS Q&A pairs (x2 messages)
     truncated_history = history[-(MAX_HISTORY_TURNS * 2):]
 
     # --- 3. Format Retrieved Context ---
@@ -198,7 +199,7 @@ async def generate_response(
         ---
         {context_text}
         ---
-        Based *only* on the information above, answer the following question: {user_input}
+        Based *only* on the information above (and potentially using direct quotes from it), answer the following question: {user_input}
         """
     else:
         context_for_prompt = f"""Relevant Information from my pages:
@@ -215,12 +216,12 @@ async def generate_response(
 
     # --- 5. Call OpenAI API ---
     try:
-        logging.info(f"Generating response with {len(messages)} messages (including system, history, query+context).")
+        logging.info(f"Generating response with {len(messages)} messages (prompt includes quoting instruction).")
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=0.3, # Lower temp for factuality, slightly higher for conversational flow
-            max_tokens=300 # Adjust response length limit
+            temperature=0.25, # Keep temperature relatively low for faithfulness to text/quotes
+            max_tokens=350 # Allow slightly longer responses if quotes are included
         )
         answer = response.choices[0].message.content.strip()
         logging.info("Successfully generated AI response.")
@@ -231,6 +232,7 @@ async def generate_response(
     except Exception as e:
         logging.error(f"Unexpected error during chat completion: {e}")
         return "Sorry, an unexpected internal error occurred."
+
 
 # --------------------------
 # FastAPI Events
