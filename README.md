@@ -1,6 +1,3 @@
-Okay, here is a comprehensive `README.md` file for your project. Save this content as `README.md` in the root directory of your project.
-
-```markdown
 # Conversational PDF Chatbot (RAG + FastAPI + Telegram)
 
 This project implements a chatbot that allows users to have conversations about the content of a specific PDF document. It uses the Retrieval-Augmented Generation (RAG) pattern, leveraging OpenAI's language models (for generating answers and embeddings) and a vector similarity search against chunks extracted from the PDF.
