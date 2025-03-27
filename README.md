@@ -99,17 +99,17 @@ TELEGRAM_BOT_TOKEN="YOUR_TELEGRAM_BOT_TOKEN_FROM_BOTFATHER_HERE"
 
 # --- Optional: URL for the Telegram Bot to reach the FastAPI service ---
 # Default is suitable if running both on the same machine. Change if deployed separately.
-# RAG_API_URL="http://localhost:8000"
+RAG_API_URL="http://localhost:8000"
 
 # --- Optional: Logging Configuration ---
 # File to log interactions (queries, context, answers)
-# QUERY_LOG_FILE="query_log.jsonl"
+QUERY_LOG_FILE="query_log.jsonl"
 
 # --- Optional: Tuning Parameters (Defaults are in the code) ---
-# CHUNK_TARGET_SIZE_CHARS=1000
-# RELEVANCE_THRESHOLD=0.70
-# MAX_CONCURRENT_EMBEDDING_REQUESTS=50
-# MAX_HISTORY_TURNS=5
+CHUNK_TARGET_SIZE_CHARS=1000
+RELEVANCE_THRESHOLD=0.70
+MAX_CONCURRENT_EMBEDDING_REQUESTS=50
+MAX_HISTORY_TURNS=5
 ```
 
 **Important:**
