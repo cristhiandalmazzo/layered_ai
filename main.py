@@ -4,11 +4,13 @@ import numpy as np
 import spacy
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field # Import Field for default history
+from pydantic import BaseModel, Field
 from openai import AsyncOpenAI, OpenAIError
 import asyncio
 from pathlib import Path
 import fitz  # PyMuPDF
+import json # For JSON handling
+from datetime import datetime # For timestamping
 
 # --------------------------
 # Configuration & Setup
@@ -23,8 +25,12 @@ BOOK_TITLE = os.getenv("BOOK_TITLE", "the document") # Default if not set
 CHUNK_TARGET_SIZE_CHARS = 1000
 RELEVANCE_THRESHOLD = 0.70
 MAX_CONCURRENT_EMBEDDING_REQUESTS = 50 # Concurrency limit for embeddings
-# ** NEW: Configure conversation memory **
 MAX_HISTORY_TURNS = 10 # Limit how many past Q&A pairs to keep in memory
+
+# --- ** NEW: Logging Configuration ** ---
+LOG_FILENAME = Path(os.getenv("QUERY_LOG_FILE", "query_log.jsonl")) # Use .jsonl extension
+# Create a lock to safely write to the log file from async tasks
+log_lock = asyncio.Lock()
 
 # --- OpenAI Client ---
 api_key = os.getenv("OPENAI_API_KEY")
@@ -115,6 +121,32 @@ def chunk_text_by_sentences(text: str, target_char_size: int) -> list[str]:
     if current_chunk: chunks.append(" ".join(current_chunk))
     logging.info(f"Split text into {len(chunks)} chunks."); return chunks
 
+# --- ** NEW: Logging Function ** ---
+async def log_interaction(
+    user_input: str,
+    history: list[ChatMessage],
+    retrieved_context: list[str],
+    answer: str
+):
+    """Appends interaction details to the JSON Lines log file safely."""
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z", # UTC timestamp in ISO format
+        "user_input": user_input,
+        "history_context": [msg.dict() for msg in history], # Log history *before* this turn
+        "retrieved_context": retrieved_context,
+        "generated_answer": answer,
+    }
+    async with log_lock: # Acquire the lock before file access
+        try:
+            with open(LOG_FILENAME, "a", encoding="utf-8") as f:
+                # Dump the dictionary as a JSON string and add a newline
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            # logging.debug(f"Successfully logged interaction to {LOG_FILENAME}") # Optional debug log
+        except IOError as e:
+            logging.error(f"Failed to write to log file {LOG_FILENAME}: {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error during logging: {e}")
+
 def extract_text_from_pdf(pdf_path: Path) -> str | None:
     if not pdf_path.is_file(): logging.error(f"PDF not found: {pdf_path}"); return None
     try:
@@ -185,7 +217,7 @@ async def generate_response(
     NEVER mention "the context provided", "the documents", "snippets", or "the information given to me". Speak naturally from your perspective (as '{BOOK_TITLE}').
     If the relevant information doesn't contain the answer to the user's question, clearly state that the topic isn't covered within your pages. Do not make up information.
     Keep your answers concise and relevant to the query, drawing only from the provided information.
-    Maintain a helpful and knowledgeable tone consistent with '{BOOK_TITLE}'.
+    Maintain a helpful and knowledgeable tone consistent with '{BOOK_TITLE}'. Be concise and to the point, when you are not quoting from the relevant information.
     """
 
     # --- 2. Prepare Conversation History ---
@@ -269,6 +301,15 @@ async def query_endpoint(request: QueryRequest):
 
     # 3. Generate Response (Async) - Pass history
     answer = await generate_response(user_input, history, retrieved_context)
+
+        # --- ** NEW: Log the interaction AFTER getting the answer ** ---
+    await log_interaction(
+        user_input=user_input,
+        history=history, # Pass the history *before* this turn
+        retrieved_context=retrieved_context,
+        answer=answer
+    )
+    # --- End Logging ---
 
     # --- Update History ---
     # Add current user query and assistant answer
